@@ -5,11 +5,12 @@ import time
 import glog
 import torch
 from transformers import AutoTokenizer
-from transformers import LlamaForCausalLM as OrigLlama
 
 from lib import codebook, utils
 from lib.utils.unsafe_import import model_from_hf_path
 from model.llama import LlamaForCausalLM
+from model.qwen3 import Qwen3ForCausalLM
+from transformers import AutoModelForCausalLM
 
 torch.set_grad_enabled(False)
 
@@ -26,17 +27,23 @@ def main(args):
     glog.info(model_config)
     fused = model_config.quip_params.get('fused', True)
 
+    model_type = model_config.model_type
+    if model_type == 'qwen3':
+        quant_model_cls = Qwen3ForCausalLM
+    else:
+        quant_model_cls = LlamaForCausalLM
+
     tokenizer = AutoTokenizer.from_pretrained(model_config._name_or_path)
 
-    model = LlamaForCausalLM.from_pretrained(model_config._name_or_path,
-                                             torch_dtype='auto',
-                                             low_cpu_mem_usage=True,
-                                             config=model_config)
+    model = quant_model_cls.from_pretrained(model_config._name_or_path,
+                                            torch_dtype='auto',
+                                            low_cpu_mem_usage=True,
+                                            config=model_config)
 
-    orig_model = OrigLlama.from_pretrained(model_config._name_or_path,
-                                           torch_dtype='auto',
-                                           low_cpu_mem_usage=True,
-                                           config=model_config)
+    orig_model = AutoModelForCausalLM.from_pretrained(model_config._name_or_path,
+                                                      torch_dtype='auto',
+                                                      low_cpu_mem_usage=True,
+                                                      config=model_config)
 
     if model_config.quip_params['skip_list'] is None:
         model_config.quip_params['skip_list'] = []
@@ -63,6 +70,12 @@ def main(args):
             layer.post_attention_layernorm.weight.copy_(
                 ln_data['post_attention_layernorm'].to(
                     layer.post_attention_layernorm.weight.dtype))
+            if 'q_norm' in ln_data and hasattr(layer.self_attn, 'q_norm'):
+                layer.self_attn.q_norm.weight.copy_(
+                    ln_data['q_norm'].to(layer.self_attn.q_norm.weight.dtype))
+            if 'k_norm' in ln_data and hasattr(layer.self_attn, 'k_norm'):
+                layer.self_attn.k_norm.weight.copy_(
+                    ln_data['k_norm'].to(layer.self_attn.k_norm.weight.dtype))
 
         if f'{ii}_q' not in model_config.quip_params['skip_list']:
             saved_layer = torch.load(f'{args.quantized_path}/{ii}_q.pt',
@@ -128,6 +141,7 @@ def main(args):
 
     glog.info(f'saving model...')
     model.save_pretrained(args.hf_output_path, safe_serialization=True)
+    tokenizer.save_pretrained(args.hf_output_path)
 
     del model
 

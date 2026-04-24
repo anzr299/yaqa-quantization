@@ -10,7 +10,7 @@ from hessian_llama.custom_linear_A import CustomLinear as CLA
 from hessian_llama.custom_linear_B import CustomLinear as CLB
 from hessian_llama.data_utils import DataLoader, FullCtx
 from datasets import load_dataset, load_from_disk
-from hessian_llama.llama_hess import LlamaForCausalLM
+from hessian_llama.qwen3_hess import Qwen3ForCausalLM as LlamaForCausalLM
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     CheckpointImpl, apply_activation_checkpointing, checkpoint_wrapper)
 from torch.distributed.fsdp import CPUOffload

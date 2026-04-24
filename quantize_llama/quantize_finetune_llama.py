@@ -58,7 +58,7 @@ parser.add_argument('--skip_list', default=None, type=str)
 
 
 def check_exist(idx, args, skip_list):
-    suffix = ['q', 'k', 'v', 'o', 'up', 'down', 'layernorm']
+    suffix = ['q', 'k', 'v', 'o', 'up', 'gate', 'down', 'layernorm']
     for _ in suffix:
         test = f'{args.save_path}/{idx}_{_}.pt'
         if not (os.path.exists(test) or f'{idx}_{_}' in skip_list):
@@ -97,11 +97,15 @@ def quantize_llama_decoder(layer, idx, cb, args, device, pre_orig_emb,
     finetune.quantize_finetune_decoder_layer(layer, quant_order, idx, cb, args,
                                              device, pre_orig_emb, orig_emb,
                                              position_embeddings)
-    torch.save(
-        {
-            'input_layernorm': layer.input_layernorm.weight,
-            'post_attention_layernorm': layer.post_attention_layernorm.weight,
-        }, f'{args.save_path}/{idx}_layernorm.pt')
+    ln_dict = {
+        'input_layernorm': layer.input_layernorm.weight,
+        'post_attention_layernorm': layer.post_attention_layernorm.weight,
+    }
+    if hasattr(layer.self_attn, 'q_norm'):
+        ln_dict['q_norm'] = layer.self_attn.q_norm.weight
+    if hasattr(layer.self_attn, 'k_norm'):
+        ln_dict['k_norm'] = layer.self_attn.k_norm.weight
+    torch.save(ln_dict, f'{args.save_path}/{idx}_layernorm.pt')
 
 
 def main(args):

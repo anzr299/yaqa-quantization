@@ -3,9 +3,9 @@ import json
 import os
 import random
 
-import datasets
 import glog
 import torch
+from accelerate import Accelerator
 from lm_eval import evaluator, tasks
 from lm_eval.models.huggingface import HFLM
 from transformers import AutoTokenizer
@@ -22,7 +22,7 @@ parser.add_argument('--tokenizer', default=None, type=str)
 parser.add_argument('--batch_size', type=int, default=1, help='batch size')
 parser.add_argument("--tasks", type=str)
 parser.add_argument("--output_path", default=None, type=str)
-parser.add_argument('--num_fewshot', type=int, default=0)
+parser.add_argument('--num_fewshot', type=int, default=None)
 parser.add_argument('--limit', type=int, default=None)
 parser.add_argument('--apply_chat_template', action='store_true')
 parser.add_argument('--fewshot_as_multiturn', action='store_true')
@@ -31,9 +31,16 @@ parser.add_argument('--max_mem_ratio', type=float, default=0.7)
 
 
 def main(args):
+    accelerator = Accelerator()
+
+    if accelerator.num_processes > 1:
+        device_map = {'': accelerator.local_process_index}
+    else:
+        device_map = 'balanced'
+
     model, model_str = model_from_hf_path(args.hf_path,
                                           max_mem_ratio=args.max_mem_ratio,
-                                          device_map='balanced')
+                                          device_map=device_map)
 
     # manifest for faster inference
     # use for codebooks without kernel support
@@ -53,6 +60,9 @@ def main(args):
     lm_eval_model = HFLM(model,
                          tokenizer=tokenizer,
                          batch_size=args.batch_size)
+    lm_eval_model._rank = accelerator.process_index
+    lm_eval_model._world_size = accelerator.num_processes
+    lm_eval_model.accelerator = accelerator
 
     results = evaluator.simple_evaluate(
         model=lm_eval_model,
@@ -62,15 +72,16 @@ def main(args):
         apply_chat_template=args.apply_chat_template,
         fewshot_as_multiturn=args.fewshot_as_multiturn)
 
-    for key in results['results']:
-        print(key)
-        print()
-        print(results['results'][key])
-        print()
-        print()
+    if accelerator.is_main_process:
+        for key in results['results']:
+            print(key)
+            print()
+            print(results['results'][key])
+            print()
+            print()
 
-    if args.output_path is not None:
-        torch.save(results, args.output_path)
+        if args.output_path is not None:
+            torch.save(results, args.output_path)
 
 
 if __name__ == '__main__':

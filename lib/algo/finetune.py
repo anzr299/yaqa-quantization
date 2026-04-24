@@ -10,7 +10,6 @@ from operator import attrgetter
 
 import glog
 import torch
-from adam import Adam as EigAdam
 from torch import multiprocessing as mp
 from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (

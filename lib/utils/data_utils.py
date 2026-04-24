@@ -1,8 +1,10 @@
 import multiprocessing as mp
 
+import os
+
 import glog
 import torch
-from datasets import load_dataset
+from datasets import Dataset as HFDataset, load_dataset
 from torch.utils.data import DataLoader, Dataset
 
 from lib import codebook
@@ -194,14 +196,30 @@ def wrap_tokenizer(tokenizer, x, ctx_size, truncate=True):
 
 
 def sample_rp1t(tokenizer, size=128, ctx_size=2048, nproc=1):
-    dataset = load_dataset('togethercomputer/RedPajama-Data-1T-Sample',
-                           split='train')
+    cache_path = '/local_ssd2/anazir/.cache/huggingface/datasets/redpajama_70k'
+    if os.path.exists(cache_path):
+        print(f'[INFO] Loading RedPajama from local cache: {cache_path}')
+        dataset = HFDataset.load_from_disk(cache_path)
+    else:
+        dataset = load_dataset('togethercomputer/RedPajama-Data-1T',
+                               'default',
+                               split="train",
+                               streaming=True,)
+        iter_dataset = iter(dataset)
+        dataset = []
+        while len(dataset) < 70000:
+            row = next(iter_dataset)
+            text = row.get('text')
+            if text:
+                dataset.append(row)
+        dataset = HFDataset.from_list(dataset)
     devset = torch.zeros((size, ctx_size), dtype=torch.int64)
     saved = 0
+    dataset_len = len(dataset)
     if nproc > 1:
         p = mp.Pool(nproc)
         while saved < size:
-            seqs = [(tokenizer, dataset[torch.randint(len(dataset),
+            seqs = [(tokenizer, dataset[torch.randint(dataset_len,
                                                       (size, ))]['text'],
                      ctx_size) for _ in range(nproc)]
             tokens = p.starmap(wrap_tokenizer, seqs)
@@ -233,13 +251,30 @@ def sample_rp1t(tokenizer, size=128, ctx_size=2048, nproc=1):
 
 
 def sample_rp1t_concat(tokenizer, size=128, ctx_size=2048, nproc=1):
-    dataset = load_dataset('togethercomputer/RedPajama-Data-1T-Sample',
-                           split='train')
+    cache_path = '/local_ssd2/anazir/.cache/huggingface/datasets/redpajama_70k'
+    if os.path.exists(cache_path):
+        print(f'[INFO] Loading RedPajama from local cache: {cache_path}')
+        dataset = HFDataset.load_from_disk(cache_path)
+    else:
+        dataset = load_dataset('togethercomputer/RedPajama-Data-1T',
+                               'default',
+                               trust_remote_code=True,
+                               split="train",
+                               streaming=True,)
+        iter_dataset = iter(dataset)
+        dataset = []
+        while len(dataset) < 70000:
+            row = next(iter_dataset)
+            text = row.get('text')
+            if text:
+                dataset.append(row)
+        dataset = HFDataset.from_list(dataset)
     devset = torch.zeros((size, ctx_size), dtype=torch.int64)
     concat = []
     p = mp.Pool(nproc)
+    dataset_len = len(dataset)
     while len(concat) < ctx_size * size:
-        seqs = [(tokenizer, dataset[torch.randint(len(dataset),
+        seqs = [(tokenizer, dataset[torch.randint(dataset_len,
                                                   (128, ))]['text'], -1, False)
                 for _ in range(nproc)]
         tokens = p.starmap(wrap_tokenizer, seqs)
